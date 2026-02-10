@@ -1,0 +1,23 @@
+{
+  "name": "rss2telegr",
+  "version": "1.0.0",
+  "description": "Telegram channel aggregator bot — scrape, filter, classify & summarize",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "keywords": ["telegram", "bot", "rss", "ai", "aggregator"],
+  "license": "MIT",
+  "dependencies": {
+    "grammy": "^1.21.1",
+    "telegram": "^2.22.2",
+    "input": "^1.0.1",
+    "openai": "^4.52.0",
+    "better-sqlite3": "^11.1.2",
+    "node-cron": "^3.0.3",
+    "pino": "^9.2.0",
+    "pino-pretty": "^11.2.1",
+    "dotenv": "^16.4.5"
+  }
+}
