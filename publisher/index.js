@@ -69,11 +69,9 @@ async function publishSingleMessage(bot, msg) {
   const source = escapeHtml(msg.source || '未知')
   const content = escapeHtml(msg.content || '')
 
-  // HTML 格式：标题小字灰色，内容加粗突出，增加行距
-  const text = `📌 <b>${category}</b>\n\n` +
-    `<i>来源: ${source}</i>\n\n` +
-    `━━━━━━━━━━━━━━━\n\n\n` +
-    `<b>${content}</b>`
+  // HTML 格式：内容在上，来源在下
+  const text = `<b>${content}</b>\n\n` +
+    `<i>来源: ${source}</i>`
 
   try {
     // 如果有图片，发送带图片的消息

@@ -1,6 +1,7 @@
 const logger = require('../utils/logger')
 const { filterPipeline } = require('../filter')
 const { classifyBatch } = require('../ai/classifier')
+const { generateDailyDigest } = require('../ai/digestGenerator')
 const { publishMessages } = require('../publisher')
 
 // 用于存储 scraper 引用（由 index.js 注入）
@@ -22,6 +23,7 @@ function registerCommands(bot, store) {
       '可用命令：\n' +
       '/status - 查看当前运行状态\n' +
       '/today - 查看今日消息统计\n' +
+      '/digest - 生成今日整体总结（约300字）\n' +
       '/summary - 获取最近一次每日总结\n' +
       '/recent - 查看最近消息（默认10条）\n' +
       '  └ /recent 5 - 查看最近5条\n' +
@@ -73,6 +75,47 @@ function registerCommands(bot, store) {
     }
 
     await ctx.reply(text, { parse_mode: 'Markdown' })
+  })
+
+  // /digest - 今日整体总结（约300字）
+  bot.command('digest', async (ctx) => {
+    const messages = messageRepo.getToday()
+    
+    if (messages.length === 0) {
+      await ctx.reply('📭 今日暂无消息，无法生成总结')
+      return
+    }
+
+    // 过滤掉垃圾分类
+    const validMessages = messages.filter(m => m.category !== 'spam')
+    
+    if (validMessages.length === 0) {
+      await ctx.reply('📭 今日无有效消息（均为垃圾分类）')
+      return
+    }
+
+    await ctx.reply(`⏳ 正在生成今日总结（${validMessages.length} 条消息）...`)
+
+    try {
+      const digest = await generateDailyDigest(validMessages)
+      
+      if (!digest) {
+        await ctx.reply('❌ 总结生成失败，请稍后重试')
+        return
+      }
+
+      const today = new Date().toISOString().split('T')[0]
+      const text = `📋 *${today} 今日总结*\n（共 ${validMessages.length} 条消息）\n\n${digest}`
+
+      if (text.length > 4000) {
+        await ctx.reply(text.substring(0, 4000) + '\n\n...（内容过长已截断）', { parse_mode: 'Markdown' })
+      } else {
+        await ctx.reply(text, { parse_mode: 'Markdown' })
+      }
+    } catch (err) {
+      logger.error({ err }, '/digest 命令执行失败')
+      await ctx.reply(`❌ 生成失败: ${err.message}`)
+    }
   })
 
   // /summary - 最近一次总结

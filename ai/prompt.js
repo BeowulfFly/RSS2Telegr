@@ -161,4 +161,30 @@ function eventDedupPrompt(messagesJson) {
   ]
 }
 
-module.exports = { classifyPrompt, summarizePrompt, categorySummaryPrompt, extractSpamKeywordsPrompt, eventDedupPrompt }
+/** 今日整体总结 Prompt（约300字） */
+function dailyDigestPrompt(messagesText, messageCount) {
+  return [
+    {
+      role: 'system',
+      content: `你是一个信息摘要专家。请对今日所有消息进行整体性总结。
+
+要求：
+1. 总结字数控制在 280-320 字（中文）
+2. 不需要分类，做一个整体的综合性总结
+3. 提炼今日最重要的 3-5 个要点或趋势
+4. 语言简洁流畅，适合快速阅读
+5. 可以适当点评或给出观点
+6. 不需要列出具体来源
+7. 使用纯文本格式，不需要 HTML 标签
+
+输出格式示例：
+今日共收到 XX 条消息。科技领域方面，...；金融市场上，...；此外，...。整体来看，今日信息主要集中在...，值得关注的是...`,
+    },
+    {
+      role: 'user',
+      content: `今日共采集 ${messageCount} 条消息，请进行整体总结：\n\n${messagesText}`,
+    },
+  ]
+}
+
+module.exports = { classifyPrompt, summarizePrompt, categorySummaryPrompt, extractSpamKeywordsPrompt, eventDedupPrompt, dailyDigestPrompt }
