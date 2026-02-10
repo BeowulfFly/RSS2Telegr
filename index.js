@@ -1,3 +1,7 @@
+// 强制 Node.js 优先使用 IPv4（解决 IPv6 连接超时问题）
+const dns = require('dns')
+dns.setDefaultResultOrder('ipv4first')
+
 const logger = require('./utils/logger')
 const config = require('./config')
 const { createStore } = require('./store')
@@ -43,8 +47,12 @@ async function main() {
   logger.info('✅ 定时任务就绪')
 
   // 5. 启动 Bot（long polling）
-  bot.start()
-  logger.info('✅ Bot 已启动，开始接收消息')
+  bot.start({
+    drop_pending_updates: true,
+    onStart: (botInfo) => logger.info({ username: botInfo.username }, '✅ Bot 已启动，开始接收消息'),
+  }).catch((err) => {
+    logger.error({ err }, 'Bot 启动失败')
+  })
 
   // 优雅退出
   const shutdown = async () => {
