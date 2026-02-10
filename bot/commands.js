@@ -1,8 +1,7 @@
 const logger = require('../utils/logger')
 const { filterPipeline } = require('../filter')
 const { classifyBatch } = require('../ai/classifier')
-const { generateDailySummary } = require('../ai/summarizer')
-const { publishDailySummary } = require('../publisher')
+const { publishMessages } = require('../publisher')
 
 // 用于存储 scraper 引用（由 index.js 注入）
 let _scraper = null
@@ -349,7 +348,7 @@ function registerCommands(bot, store) {
     }
   })
 
-  // /fetch - 立即抓取、处理并发布总结
+  // /fetch - 立即抓取、处理并逐条发布
   bot.command('fetch', async (ctx) => {
     if (!_scraper) {
       await ctx.reply('⚠️ Scraper 未初始化，请稍后再试')
@@ -382,29 +381,20 @@ function registerCommands(bot, store) {
 
       // 4. 存储
       messageRepo.saveMany(classified)
-      await ctx.reply(`💾 已保存 ${classified.length} 条消息，正在生成总结...`)
+      await ctx.reply(`💾 已保存 ${classified.length} 条消息，正在逐条发布...`)
 
-      // 5. 生成总结
-      const summaryText = await generateDailySummary(classified)
+      // 5. 过滤垃圾分类
+      const validMessages = classified.filter(m => m.category !== 'spam')
 
-      // 6. 保存总结
-      const today = new Date().toISOString().split('T')[0]
-      const categoryCount = {}
-      for (const msg of classified) {
-        const cat = msg.category || 'other'
-        categoryCount[cat] = (categoryCount[cat] || 0) + 1
+      if (validMessages.length === 0) {
+        await ctx.reply('📭 无有效消息需要发布（均为垃圾分类）')
+        return
       }
-      summaryRepo.save({
-        date: today,
-        content: summaryText,
-        categories: categoryCount,
-        msgCount: classified.length,
-      })
 
-      // 7. 发布到频道
-      await publishDailySummary(bot, summaryText)
+      // 6. 逐条发布到频道（间隔 500ms）
+      await publishMessages(bot, validMessages, 500)
 
-      await ctx.reply(`✅ 完成！已抓取 ${classified.length} 条消息并发布总结到频道`)
+      await ctx.reply(`✅ 完成！已抓取 ${classified.length} 条消息，发布 ${validMessages.length} 条到频道`)
     } catch (err) {
       logger.error({ err }, '/fetch 命令执行失败')
       await ctx.reply(`❌ 执行失败: ${err.message}`)

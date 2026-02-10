@@ -2,7 +2,14 @@ const { sendToChannel, sendPhotoToChannel } = require('./channelPublisher')
 const logger = require('../utils/logger')
 
 /**
- * 发布每日总结到频道
+ * 延迟函数
+ */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+/**
+ * 发布每日总结到频道（保留兼容）
  * @param {import('grammy').Bot} bot
  * @param {string} summaryText
  */
@@ -13,6 +20,37 @@ async function publishDailySummary(bot, summaryText) {
   } catch (err) {
     logger.error({ err }, '发布每日总结失败')
   }
+}
+
+/**
+ * 逐条发布消息到频道（不聚合、不小结，保持原样）
+ * @param {import('grammy').Bot} bot
+ * @param {Array} messages - 消息数组
+ * @param {number} intervalMs - 每条消息发送间隔（毫秒），默认 500
+ */
+async function publishMessages(bot, messages, intervalMs = 500) {
+  if (!messages || messages.length === 0) {
+    logger.info('无消息需要发布')
+    return
+  }
+
+  let successCount = 0
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]
+    try {
+      await publishSingleMessage(bot, msg)
+      successCount++
+    } catch (err) {
+      logger.error({ err, source: msg.source }, '发布单条消息失败')
+    }
+
+    // 非最后一条时等待间隔
+    if (i < messages.length - 1) {
+      await sleep(intervalMs)
+    }
+  }
+
+  logger.info({ total: messages.length, success: successCount }, '批量消息发布完成')
 }
 
 /**
@@ -50,4 +88,4 @@ async function publishSingleMessage(bot, msg) {
   }
 }
 
-module.exports = { publishDailySummary, publishSingleMessage }
+module.exports = { publishDailySummary, publishSingleMessage, publishMessages }
