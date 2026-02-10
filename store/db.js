@@ -58,6 +58,23 @@ function initDB() {
     )
   `)
 
+  // AI 去重记录表（存储相同事件的消息组）
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ai_dedup_groups (
+      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      kept_content        TEXT    NOT NULL,
+      kept_source         TEXT    NOT NULL,
+      removed_content     TEXT    NOT NULL,
+      removed_source      TEXT    NOT NULL,
+      similarity_reason   TEXT    DEFAULT '',
+      created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+    )
+  `)
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_ai_dedup_date ON ai_dedup_groups(created_at)
+  `)
+
   logger.info('数据库初始化完成')
   return db
 }

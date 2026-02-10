@@ -26,8 +26,8 @@ async function main() {
   // 3. 初始化 Scraper（MTProto 客户端）
   //    onMessage 回调：实时消息进入过滤 → 分类 → 存储管线
   const scraper = await createScraper(async (msg) => {
-    // 过滤（单条消息也走管线）
-    const filtered = filterPipeline([msg], store.messageRepo)
+    // 过滤（单条消息也走管线，传入 aiDedupRepo 支持 AI 去重）
+    const filtered = await filterPipeline([msg], store.messageRepo, store.aiDedupRepo)
     if (filtered.length === 0) return
 
     // AI 分类

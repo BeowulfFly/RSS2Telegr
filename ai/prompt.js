@@ -125,4 +125,40 @@ function extractSpamKeywordsPrompt(messagesText) {
   ]
 }
 
-module.exports = { classifyPrompt, summarizePrompt, categorySummaryPrompt, extractSpamKeywordsPrompt }
+/** 事件去重 Prompt（批量比较消息，识别相同事件）*/
+function eventDedupPrompt(messagesJson) {
+  return [
+    {
+      role: 'system',
+      content: `你是一个消息去重助手。请分析以下消息列表，找出讲述**相同事件**的消息组。
+
+判断标准：
+- 相同事件：描述同一件事、同一个新闻、同一个公告，只是表述不同
+- 不同事件：即使话题相似，但是不同的具体事件（如不同公司的融资消息是不同事件）
+
+返回 JSON 格式：
+{
+  "groups": [
+    {
+      "keep": 0,
+      "remove": [1, 2],
+      "reason": "简述为什么这些消息是同一事件"
+    }
+  ]
+}
+
+说明：
+- keep: 保留的消息索引（选择信息最完整或最早的一条）
+- remove: 要移除的消息索引数组
+- reason: 简短说明相似原因（10-30字）
+- 如果没有重复，返回 {"groups": []}
+- 只返回 JSON，不要其他文字`,
+    },
+    {
+      role: 'user',
+      content: `请分析以下 ${JSON.parse(messagesJson).length} 条消息：\n\n${messagesJson}`,
+    },
+  ]
+}
+
+module.exports = { classifyPrompt, summarizePrompt, categorySummaryPrompt, extractSpamKeywordsPrompt, eventDedupPrompt }

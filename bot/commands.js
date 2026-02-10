@@ -13,7 +13,7 @@ function setScraper(scraper) {
 
 /** 注册 Bot 命令 */
 function registerCommands(bot, store) {
-  const { messageRepo, summaryRepo } = store
+  const { messageRepo, summaryRepo, aiDedupRepo } = store
 
   // /start - 欢迎信息
   bot.command('start', async (ctx) => {
@@ -29,7 +29,9 @@ function registerCommands(bot, store) {
       '/search - 关键词搜索消息\n' +
       '  └ /search AI 科技 - 匹配任意词（或）\n' +
       '  └ /search and AI 科技 - 匹配全部词（且）\n' +
-      '/fetch - 立即抓取、处理并发布总结\n' +
+      '/dedup - 查看 AI 去重记录对比\n' +
+      '  └ /dedup 10 - 查看最近10条去重记录\n' +
+      '/fetch - 立即抓取、处理并发布\n' +
       '/clear - 清除历史数据\n' +
       '  └ /clear all - 清除所有\n' +
       '  └ /clear 2026-02-10 - 清除指定日期\n' +
@@ -348,6 +350,52 @@ function registerCommands(bot, store) {
     }
   })
 
+  // /dedup - 查看 AI 去重记录
+  bot.command('dedup', async (ctx) => {
+    const text = ctx.message.text.trim()
+    const parts = text.split(/\s+/)
+
+    // 解析参数：/dedup 或 /dedup 5
+    let limit = 5
+    if (parts[1]) {
+      const num = parseInt(parts[1], 10)
+      if (!isNaN(num) && num > 0) {
+        limit = Math.min(num, 20) // 最多20条
+      }
+    }
+
+    const records = aiDedupRepo.getRecent(limit)
+    const todayCount = aiDedupRepo.countToday()
+
+    if (records.length === 0) {
+      await ctx.reply('📭 暂无 AI 去重记录')
+      return
+    }
+
+    await ctx.reply(`🔍 AI 事件去重记录（今日 ${todayCount} 条，显示最近 ${records.length} 条）：`)
+
+    const escapeHtml = (str) => str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+
+    for (const record of records) {
+      const keptPreview = escapeHtml(record.kept_content.substring(0, 150))
+      const removedPreview = escapeHtml(record.removed_content.substring(0, 150))
+      const reason = escapeHtml(record.similarity_reason || '未说明')
+
+      let msgText = `📅 <i>${record.created_at}</i>\n\n`
+      msgText += `✅ <b>保留:</b> ${escapeHtml(record.kept_source)}\n`
+      msgText += `${keptPreview}${record.kept_content.length > 150 ? '...' : ''}\n\n`
+      msgText += `❌ <b>移除:</b> ${escapeHtml(record.removed_source)}\n`
+      msgText += `${removedPreview}${record.removed_content.length > 150 ? '...' : ''}\n\n`
+      msgText += `💡 <b>原因:</b> ${reason}\n`
+      msgText += `━━━━━━━━━━━━━━━`
+
+      await ctx.reply(msgText, { parse_mode: 'HTML' })
+    }
+  })
+
   // /fetch - 立即抓取、处理并逐条发布
   bot.command('fetch', async (ctx) => {
     if (!_scraper) {
@@ -367,8 +415,8 @@ function registerCommands(bot, store) {
 
       await ctx.reply(`📥 抓取到 ${messages.length} 条消息，正在过滤...`)
 
-      // 2. 过滤
-      const filtered = filterPipeline(messages, messageRepo)
+      // 2. 过滤（包含 AI 事件去重）
+      const filtered = await filterPipeline(messages, messageRepo, aiDedupRepo)
       if (filtered.length === 0) {
         await ctx.reply('📭 过滤后无新消息（可能都是重复的）')
         return

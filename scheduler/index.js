@@ -12,7 +12,7 @@ const { publishMessages } = require('../publisher')
  * @param {object} deps.scraper
  */
 function startScheduler({ bot, store, scraper }) {
-  const { messageRepo } = store
+  const { messageRepo, aiDedupRepo } = store
 
   // 定时抓取历史消息（补充实时监听可能遗漏的）
   cron.schedule(config.schedule.scrapeCron, async () => {
@@ -26,8 +26,8 @@ function startScheduler({ bot, store, scraper }) {
         return
       }
 
-      // 过滤
-      const filtered = filterPipeline(messages, messageRepo)
+      // 过滤（包含 AI 事件去重）
+      const filtered = await filterPipeline(messages, messageRepo, aiDedupRepo)
 
       if (filtered.length === 0) {
         logger.info('过滤后无新消息')
