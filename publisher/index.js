@@ -69,8 +69,8 @@ async function publishSingleMessage(bot, msg) {
   const source = escapeHtml(msg.source || '未知')
   const content = escapeHtml(msg.content || '')
 
-  // HTML 格式：内容在上，来源在下
-  const text = `<b>${content}</b>\n\n` +
+  // 正常字体：内容在上，来源在下
+  const text = `${content}\n\n` +
     `<i>来源: ${source}</i>`
 
   try {

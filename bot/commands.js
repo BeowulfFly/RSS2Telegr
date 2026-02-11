@@ -183,8 +183,8 @@ function registerCommands(bot, store) {
       const content = msg.content.trim()
       const source = escapeHtml(msg.source || '未知')
 
-      // 简洁格式：只显示内容和来源
-      let msgText = `<b>${escapeHtml(content)}</b>\n\n`
+      // 简洁格式：只显示内容和来源，正常字体
+      let msgText = `${escapeHtml(content)}\n\n`
       msgText += `<i>— ${source}</i>`
 
       // 如果单条消息太长，分段发送
@@ -317,7 +317,7 @@ function registerCommands(bot, store) {
     let fullText = `${cat} <b>#${msg.id}</b> (全文)\n\n`
     fullText += `<i>📅 ${msg.created_at} | 来源: ${escapeHtml(msg.source)}</i>\n\n`
     fullText += `━━━━━━━━━━━━━━━\n\n\n`
-    fullText += `<b>${escapeHtml(msg.content)}</b>`
+    fullText += `${escapeHtml(msg.content)}`
 
     // 如果全文太长，分段发送
     if (fullText.length > 4000) {
