@@ -64,8 +64,8 @@ function startScheduler({ bot, store, scraper }) {
         return
       }
 
-      // 逐条发送，间隔 500ms
-      await publishMessages(bot, validMessages, 500)
+      // 逐条发送，使用配置的间隔避免触发 Telegram 频率限制
+      await publishMessages(bot, validMessages, config.publisher.intervalMs)
 
       logger.info({ date: new Date().toISOString().split('T')[0], msgCount: validMessages.length }, '每日消息已逐条发布')
     } catch (err) {

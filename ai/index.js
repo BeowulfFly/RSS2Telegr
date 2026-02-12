@@ -4,7 +4,7 @@ const logger = require('../utils/logger')
 
 let client = null
 
-/** 获取 OpenAI 客户端单例 */
+/** 获取 AI 客户端单例（支持 OpenAI / DeepSeek 等兼容 API） */
 function getClient() {
   if (!client) {
     const opts = { apiKey: config.ai.apiKey }
@@ -12,7 +12,7 @@ function getClient() {
       opts.baseURL = config.ai.baseURL
     }
     client = new OpenAI(opts)
-    logger.info({ model: config.ai.model }, 'OpenAI 客户端已初始化')
+    logger.info({ model: config.ai.model, baseURL: config.ai.baseURL || 'default' }, 'AI 客户端已初始化')
   }
   return client
 }
@@ -24,8 +24,8 @@ function isNewModel(model) {
 }
 
 /**
- * 调用 ChatGPT 完成对话
- * @param {Array} messages - OpenAI messages 数组
+ * 调用 AI 模型完成对话（支持 OpenAI / DeepSeek 等兼容 API）
+ * @param {Array} messages - OpenAI 格式的 messages 数组
  * @param {object} opts - 额外参数
  * @returns {string} 助手回复内容
  */

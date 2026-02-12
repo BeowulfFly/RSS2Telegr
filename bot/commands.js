@@ -1,8 +1,19 @@
+const config = require('../config')
 const logger = require('../utils/logger')
 const { filterPipeline } = require('../filter')
 const { classifyBatch } = require('../ai/classifier')
 const { generateDailyDigest } = require('../ai/digestGenerator')
-const { publishMessages } = require('../publisher')
+const { publishMessages, publishMessagesWithProgress } = require('../publisher')
+const { chatWithUser, detectConfirmation } = require('../ai/chatbot')
+
+// 存储用户的待确认指令（userId -> { commands: Array, question: string, timestamp: number }）
+const pendingCommands = new Map()
+
+// 待确认指令过期时间（60秒）
+const PENDING_EXPIRE_MS = 60 * 1000
+
+// 存储命令处理函数（用于直接执行）
+const commandHandlers = {}
 
 // 用于存储 scraper 引用（由 index.js 注入）
 let _scraper = null
@@ -12,12 +23,35 @@ function setScraper(scraper) {
   _scraper = scraper
 }
 
+/**
+ * 直接执行指令
+ * @param {string} command - 指令名称（如 /status）
+ * @param {object} ctx - grammy context
+ */
+async function executeCommand(command, ctx) {
+  const handler = commandHandlers[command]
+  if (handler) {
+    try {
+      await handler(ctx)
+    } catch (err) {
+      logger.error({ err, command }, '执行指令失败')
+      await ctx.reply(`❌ 执行失败: ${err.message}`)
+    }
+  } else {
+    await ctx.reply(`❌ 未知指令: ${command}`)
+  }
+}
+
 /** 注册 Bot 命令 */
 function registerCommands(bot, store) {
   const { messageRepo, summaryRepo, aiDedupRepo } = store
 
   // /start - 欢迎信息
   bot.command('start', async (ctx) => {
+    const aiChatInfo = config.ai.enableChat 
+      ? '\n\n💬 提示：除了使用命令，您也可以直接和我聊天！' 
+      : ''
+
     await ctx.reply(
       '👋 欢迎使用频道聚合 Bot！\n\n' +
       '可用命令：\n' +
@@ -37,12 +71,13 @@ function registerCommands(bot, store) {
       '/clear - 清除历史数据\n' +
       '  └ /clear all - 清除所有\n' +
       '  └ /clear 2026-02-10 - 清除指定日期\n' +
-      '  └ /clear before 2026-02-01 - 清除该日期之前'
+      '  └ /clear before 2026-02-01 - 清除该日期之前' +
+      aiChatInfo
     )
   })
 
   // /status - 运行状态
-  bot.command('status', async (ctx) => {
+  commandHandlers['/status'] = async (ctx) => {
     const todayCount = messageRepo.countToday()
     const recentSummaries = summaryRepo.getRecent(1)
     const lastSummary = recentSummaries[0]
@@ -52,10 +87,11 @@ function registerCommands(bot, store) {
     text += `最近总结日期：${lastSummary ? lastSummary.date : '暂无'}`
 
     await ctx.reply(text, { parse_mode: 'Markdown' })
-  })
+  }
+  bot.command('status', commandHandlers['/status'])
 
   // /today - 今日消息统计
-  bot.command('today', async (ctx) => {
+  commandHandlers['/today'] = async (ctx) => {
     const messages = messageRepo.getToday()
     if (messages.length === 0) {
       await ctx.reply('📭 今日暂无采集到的消息')
@@ -75,10 +111,11 @@ function registerCommands(bot, store) {
     }
 
     await ctx.reply(text, { parse_mode: 'Markdown' })
-  })
+  }
+  bot.command('today', commandHandlers['/today'])
 
   // /digest - 今日整体总结（约300字）
-  bot.command('digest', async (ctx) => {
+  commandHandlers['/digest'] = async (ctx) => {
     const messages = messageRepo.getToday()
     
     if (messages.length === 0) {
@@ -116,10 +153,11 @@ function registerCommands(bot, store) {
       logger.error({ err }, '/digest 命令执行失败')
       await ctx.reply(`❌ 生成失败: ${err.message}`)
     }
-  })
+  }
+  bot.command('digest', commandHandlers['/digest'])
 
   // /summary - 最近一次总结
-  bot.command('summary', async (ctx) => {
+  commandHandlers['/summary'] = async (ctx) => {
     const recent = summaryRepo.getRecent(1)
     if (recent.length === 0) {
       await ctx.reply('📭 暂无每日总结，等待定时任务生成...')
@@ -135,11 +173,12 @@ function registerCommands(bot, store) {
     } else {
       await ctx.reply(text, { parse_mode: 'Markdown' })
     }
-  })
+  }
+  bot.command('summary', commandHandlers['/summary'])
 
   // /recent - 最近消息（全部显示，默认10条，可加参数）
   // 用法: /recent 或 /recent 5 或 /recent 3-8
-  bot.command('recent', async (ctx) => {
+  commandHandlers['/recent'] = async (ctx) => {
     const text = ctx.message.text.trim()
     const parts = text.split(/\s+/)
     // parts[0] = '/recent', parts[1] = 参数（可选）
@@ -202,12 +241,13 @@ function registerCommands(bot, store) {
         await ctx.reply(msgText, { parse_mode: 'HTML' })
       }
     }
-  })
+  }
+  bot.command('recent', commandHandlers['/recent'])
 
   // /search - 关键词搜索消息
   // 用法: /search 关键词1 关键词2 （默认或）
   //       /search and 关键词1 关键词2 （且）
-  bot.command('search', async (ctx) => {
+  commandHandlers['/search'] = async (ctx) => {
     const text = ctx.message.text.trim()
     const parts = text.split(/\s+/).slice(1) // 去掉 /search
 
@@ -292,11 +332,14 @@ function registerCommands(bot, store) {
         await ctx.reply(msgText, { parse_mode: 'HTML' })
       }
     }
-  })
+  }
+  bot.command('search', commandHandlers['/search'])
 
-  // 处理展开全文的回调
+  // 处理回调按钮（展开全文等）
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery.data
+
+    // 处理展开全文按钮
     if (!data.startsWith('expand_')) return
 
     // 转义 HTML 特殊字符
@@ -338,8 +381,8 @@ function registerCommands(bot, store) {
   })
 
   // /clear - 清除历史数据
-  bot.command('clear', async (ctx) => {
-    const text = ctx.message.text.trim()
+  commandHandlers['/clear'] = async (ctx) => {
+    const text = ctx.message?.text?.trim() || '/clear'
     const parts = text.split(/\s+/)
     // parts[0] = '/clear', parts[1] = 参数1, parts[2] = 参数2（可选）
 
@@ -391,10 +434,11 @@ function registerCommands(bot, store) {
         '• /clear before 2026-02-01'
       )
     }
-  })
+  }
+  bot.command('clear', commandHandlers['/clear'])
 
   // /dedup - 查看 AI 去重记录
-  bot.command('dedup', async (ctx) => {
+  commandHandlers['/dedup'] = async (ctx) => {
     const text = ctx.message.text.trim()
     const parts = text.split(/\s+/)
 
@@ -437,62 +481,188 @@ function registerCommands(bot, store) {
 
       await ctx.reply(msgText, { parse_mode: 'HTML' })
     }
-  })
+  }
+  bot.command('dedup', commandHandlers['/dedup'])
 
-  // /fetch - 立即抓取、处理并逐条发布
-  bot.command('fetch', async (ctx) => {
+  // /fetch - 立即抓取、处理并逐条发布（带实时进度条）
+  commandHandlers['/fetch'] = async (ctx) => {
     if (!_scraper) {
       await ctx.reply('⚠️ Scraper 未初始化，请稍后再试')
       return
     }
 
-    await ctx.reply('⏳ 开始抓取频道消息...')
+    // 进度条生成函数
+    const makeProgress = (percent, width = 10) => {
+      const filled = Math.round(percent / 100 * width)
+      const empty = width - filled
+      return '█'.repeat(filled) + '░'.repeat(empty)
+    }
+
+    // 格式化进度消息
+    const formatProgress = (step, totalSteps, stepName, detail = '') => {
+      const percent = Math.round(step / totalSteps * 100)
+      const bar = makeProgress(percent)
+      let text = `🔄 *抓取进度* ${bar} ${percent}%\n\n`
+      text += `📍 ${stepName}\n`
+      if (detail) text += `${detail}\n`
+      text += `\n步骤: ${step}/${totalSteps}`
+      return text
+    }
+
+    // 发送初始进度消息
+    const progressMsg = await ctx.reply(formatProgress(0, 6, '准备开始...'), { parse_mode: 'Markdown' })
+    const chatId = progressMsg.chat.id
+    const msgId = progressMsg.message_id
+
+    // 更新进度消息
+    const updateProgress = async (step, totalSteps, stepName, detail = '') => {
+      try {
+        await ctx.api.editMessageText(chatId, msgId, formatProgress(step, totalSteps, stepName, detail), { parse_mode: 'Markdown' })
+      } catch (e) {
+        // 忽略编辑失败（可能内容相同）
+      }
+    }
 
     try {
       // 1. 抓取历史消息
+      await updateProgress(1, 6, '正在抓取频道消息...', '⏳ 连接频道中')
       const messages = await _scraper.fetchAllHistory(50)
+      
       if (messages.length === 0) {
-        await ctx.reply('📭 本次抓取无新消息')
+        await ctx.api.editMessageText(chatId, msgId, '📭 本次抓取无新消息')
         return
       }
-
-      await ctx.reply(`📥 抓取到 ${messages.length} 条消息，正在过滤...`)
+      await updateProgress(1, 6, '抓取完成', `📥 获取到 ${messages.length} 条消息`)
 
       // 2. 过滤（包含 AI 事件去重）
+      await updateProgress(2, 6, '正在过滤消息...', `🔍 处理 ${messages.length} 条消息`)
       const filtered = await filterPipeline(messages, messageRepo, aiDedupRepo)
+      
       if (filtered.length === 0) {
-        await ctx.reply('📭 过滤后无新消息（可能都是重复的）')
+        await ctx.api.editMessageText(chatId, msgId, '📭 过滤后无新消息（可能都是重复的）')
         return
       }
-
-      await ctx.reply(`🔍 过滤后 ${filtered.length} 条新消息，正在 AI 分类...`)
+      await updateProgress(2, 6, '过滤完成', `✅ 保留 ${filtered.length} 条新消息`)
 
       // 3. AI 分类
+      await updateProgress(3, 6, '正在 AI 分类...', `🤖 分析 ${filtered.length} 条消息`)
       const classified = await classifyBatch(filtered)
+      await updateProgress(3, 6, 'AI 分类完成', `🏷️ 已分类 ${classified.length} 条消息`)
 
       // 4. 存储
+      await updateProgress(4, 6, '正在保存到数据库...', `💾 存储 ${classified.length} 条消息`)
       messageRepo.saveMany(classified)
-      await ctx.reply(`💾 已保存 ${classified.length} 条消息，正在逐条发布...`)
 
       // 5. 过滤垃圾分类
       const validMessages = classified.filter(m => m.category !== 'spam')
+      const spamCount = classified.length - validMessages.length
 
       if (validMessages.length === 0) {
-        await ctx.reply('📭 无有效消息需要发布（均为垃圾分类）')
+        await ctx.api.editMessageText(chatId, msgId, `📭 无有效消息需要发布\n（${spamCount} 条被标记为垃圾）`)
+        return
+      }
+      await updateProgress(4, 6, '保存完成', `✅ 有效消息 ${validMessages.length} 条，垃圾 ${spamCount} 条`)
+
+      // 6. 逐条发布到频道
+      await updateProgress(5, 6, '正在发布到频道...', `📤 发布 ${validMessages.length} 条消息\n⏱️ 预计 ${Math.ceil(validMessages.length * config.publisher.intervalMs / 1000)} 秒`)
+      
+      // 使用带进度回调的发布函数
+      let publishedCount = 0
+      const onPublish = async (current, total) => {
+        publishedCount = current
+        const publishPercent = Math.round(current / total * 100)
+        await updateProgress(5, 6, '正在发布到频道...', `📤 发布进度 ${current}/${total} (${publishPercent}%)`)
+      }
+      
+      await publishMessagesWithProgress(bot, validMessages, config.publisher.intervalMs, onPublish)
+
+      // 完成
+      const finalText = `✅ *抓取完成！*\n\n` +
+        `📥 抓取: ${messages.length} 条\n` +
+        `🔍 过滤后: ${filtered.length} 条\n` +
+        `🏷️ 分类后: ${classified.length} 条\n` +
+        `📤 已发布: ${validMessages.length} 条\n` +
+        `🗑️ 垃圾过滤: ${spamCount} 条`
+      
+      await ctx.api.editMessageText(chatId, msgId, finalText, { parse_mode: 'Markdown' })
+    } catch (err) {
+      logger.error({ err }, '/fetch 命令执行失败')
+      try {
+        await ctx.api.editMessageText(chatId, msgId, `❌ 执行失败: ${err.message}`)
+      } catch (e) {
+        await ctx.reply(`❌ 执行失败: ${err.message}`)
+      }
+    }
+  }
+  bot.command('fetch', commandHandlers['/fetch'])
+
+  // 处理所有非命令消息（AI 聊天）
+  if (config.ai.enableChat) {
+    bot.on('message:text', async (ctx) => {
+      const text = ctx.message.text
+      const userId = ctx.from.id
+
+      // 跳过以 / 开头的消息（已被命令处理器处理）
+      if (text.startsWith('/')) {
+        // 清除该用户的待确认状态
+        pendingCommands.delete(userId)
         return
       }
 
-      // 6. 逐条发布到频道（间隔 500ms）
-      await publishMessages(bot, validMessages, 500)
+      try {
+        logger.info({ userId, username: ctx.from.username, text }, '收到非命令消息')
 
-      await ctx.reply(`✅ 完成！已抓取 ${classified.length} 条消息，发布 ${validMessages.length} 条到频道`)
-    } catch (err) {
-      logger.error({ err }, '/fetch 命令执行失败')
-      await ctx.reply(`❌ 执行失败: ${err.message}`)
-    }
-  })
+        // 1. 检查是否有待确认的指令
+        const pending = pendingCommands.get(userId)
+        if (pending && Date.now() - pending.timestamp < PENDING_EXPIRE_MS) {
+          // 使用 AI 判断用户回复是肯定还是否定
+          const confirmation = await detectConfirmation(text, pending.question)
+          
+          if (confirmation === 'confirm') {
+            // 用户确认，直接执行指令
+            const cmd = pending.commands[0]
+            pendingCommands.delete(userId)
+            
+            logger.info({ userId, command: cmd.command }, '用户确认执行指令')
+            await ctx.reply(`✅ 好的老板，马上执行~`)
+            await executeCommand(cmd.command, ctx)
+            return
+          } else if (confirmation === 'deny') {
+            // 用户否定，清除状态
+            pendingCommands.delete(userId)
+            await ctx.reply('好的老板，还有什么需要帮忙的吗？')
+            return
+          }
+          // unknown 继续正常聊天流程，可能用户在说别的
+        }
 
-  logger.info('Bot 命令注册完成')
+        // 2. 处理聊天（会自动检测指令意图）
+        const result = await chatWithUser(text, {
+          userId,
+          username: ctx.from.username,
+        })
+
+        // 3. 如果检测到指令意图，保存待确认状态并询问
+        if (result.type === 'command' && result.commands) {
+          pendingCommands.set(userId, {
+            commands: result.commands,
+            question: result.content, // 保存问题用于 AI 判断上下文
+            timestamp: Date.now(),
+          })
+        }
+
+        await ctx.reply(result.content)
+      } catch (err) {
+        logger.error({ err, text }, '处理非命令消息失败')
+        await ctx.reply('抱歉，我现在有点忙，稍后再聊吧 😅')
+      }
+    })
+    logger.info('AI 聊天功能已启用')
+  } else {
+    logger.info('AI 聊天功能已禁用')
+  }
+
+  logger.info('Bot 命令和消息处理器注册完成')
 }
 
 module.exports = { registerCommands, setScraper }
