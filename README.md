@@ -7,6 +7,7 @@ Telegram 频道聚合 Bot - 智能监控、分类、去重和发布频道消息
 - 📡 **多频道监控**: 同时监控多个 Telegram 频道的消息
 - 🤖 **AI 智能分类**: 自动分类消息（科技、财经、生活等）并过滤垃圾内容
 - 🔄 **智能去重**: 使用 AI 识别和去除相似内容
+- 🌐 **智能翻译**: 自动识别英文消息并翻译成中文（基于 AI）
 - ⏰ **定时发布**: 自动定时发布精选消息到目标频道
 - 📊 **数据统计**: 提供详细的消息统计和分析
 - 💬 **AI 聊天**: 支持自然语言交互，可以闲聊和问答
@@ -44,6 +45,11 @@ OPENAI_BASE_URL=https://api.deepseek.com
 
 # 启用 AI 聊天功能
 ENABLE_AI_CHAT=true
+
+# 启用自动翻译（默认 true）
+ENABLE_TRANSLATION=true
+# 翻译阈值（中文占比低于此值时翻译，默认 0.2）
+TRANSLATION_THRESHOLD=0.2
 
 # 消息发布间隔（毫秒）
 PUBLISH_INTERVAL_MS=3000
@@ -125,6 +131,31 @@ OPENAI_MODEL=model_name
 OPENAI_BASE_URL=https://your-api-endpoint.com
 ```
 
+### 翻译配置
+
+自动将英文消息翻译成中文：
+
+```bash
+# 启用翻译功能
+ENABLE_TRANSLATION=true
+
+# 翻译阈值（0.0-1.0）
+# 当中文字符占比低于此值时，自动翻译成中文
+# 默认 0.2，即中文字符少于 20% 时翻译
+TRANSLATION_THRESHOLD=0.2
+```
+
+**工作原理：**
+1. 系统自动检测消息语言
+2. 如果中文字符占比低于阈值，判定为英文消息
+3. 使用 AI 模型将英文翻译成中文
+4. 保持原有格式（换行、列表等）
+5. 翻译失败时自动降级到原文
+
+**成本说明：**
+- 使用 DeepSeek：约 ¥0.001-0.003/条消息
+- 使用 GPT-4o-mini：约 ¥0.01-0.03/条消息
+
 ### 频率限制配置
 
 为避免触发 Telegram API 频率限制：
@@ -149,7 +180,8 @@ RSS2Telegr/
 │   ├── deduplicator.js # 去重器
 │   ├── digestGenerator.js # 总结生成器
 │   ├── summarizer.js  # 摘要生成器
-│   └── chatbot.js     # AI 聊天功能
+│   ├── chatbot.js     # AI 聊天功能
+│   └── translator.js  # AI 翻译功能
 ├── bot/               # Telegram Bot
 │   ├── index.js       # Bot 初始化
 │   └── commands.js    # 命令处理器
@@ -183,6 +215,23 @@ RSS2Telegr/
 - DeepSeek
 - Azure OpenAI
 - 本地部署的模型（如 Ollama + LiteLLM）
+
+### 5. 如何禁用翻译功能？
+
+设置 `ENABLE_TRANSLATION=false` 即可。
+
+### 6. 翻译功能支持哪些语言？
+
+当前版本支持：
+- **英文 → 中文**: 自动检测并翻译
+- 其他语言暂不支持自动翻译
+
+### 7. 如何调整翻译灵敏度？
+
+修改 `TRANSLATION_THRESHOLD` 参数：
+- `0.1`: 更激进（中文少于 10% 就翻译）
+- `0.2`: 默认值（推荐）
+- `0.3`: 更保守（中文少于 30% 才翻译）
 
 ## 许可证
 

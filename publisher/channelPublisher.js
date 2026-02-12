@@ -2,6 +2,7 @@ const fs = require('fs')
 const { InputFile } = require('grammy')
 const config = require('../config')
 const logger = require('../utils/logger')
+const { translateToZh } = require('../ai/translator')
 
 /** Telegram 单条消息最大长度 */
 const MAX_MSG_LENGTH = 4096
@@ -27,8 +28,11 @@ async function sendToChannel(bot, text, opts = {}) {
     return
   }
 
+  // 翻译文本（如果是英文为主）
+  const translatedText = await translateToZh(text)
+
   // 处理超长消息：分段发送
-  const chunks = splitMessage(text, MAX_MSG_LENGTH - 100)
+  const chunks = splitMessage(translatedText, MAX_MSG_LENGTH - 100)
 
   for (const chunk of chunks) {
     await sendMessageWithRetry(bot, channelId, chunk, {
@@ -121,8 +125,11 @@ async function sendPhotoToChannel(bot, imagePath, caption = '', opts = {}) {
     return
   }
 
+  // 翻译图片说明文字（如果是英文为主）
+  const translatedCaption = caption ? await translateToZh(caption) : ''
+
   // Telegram 图片说明最大长度 1024
-  const truncatedCaption = caption.length > 1000 ? caption.substring(0, 1000) + '...' : caption
+  const truncatedCaption = translatedCaption.length > 1000 ? translatedCaption.substring(0, 1000) + '...' : translatedCaption
   
   await sendPhotoWithRetry(bot, channelId, imagePath, truncatedCaption, {
     parse_mode: opts.parseMode || 'HTML',
