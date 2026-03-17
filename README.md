@@ -236,4 +236,3 @@ RSS2Telegr/
 ## 许可证
 
 MIT
-

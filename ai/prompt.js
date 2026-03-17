@@ -187,4 +187,47 @@ function dailyDigestPrompt(messagesText, messageCount) {
   ]
 }
 
-module.exports = { classifyPrompt, summarizePrompt, categorySummaryPrompt, extractSpamKeywordsPrompt, eventDedupPrompt, dailyDigestPrompt }
+/**
+ * 发布前去重 Prompt
+ * 对比当前待发布消息与历史已发消息，识别重复
+ * @param {string} currentJson - 当前待发布消息 JSON
+ * @param {string} historicalJson - 历史已发消息 JSON（仅供对比）
+ */
+function prePublishDedupPrompt(currentJson, historicalJson) {
+  const currentCount = JSON.parse(currentJson).length
+  const histCount = JSON.parse(historicalJson).length
+  return [
+    {
+      role: 'system',
+      content: `你是一个消息去重助手。在发布前检查当前待发布消息是否与其他当前消息或历史已发布消息重复。
+
+判断标准：
+- 相同事件：描述同一件事、同一新闻、同一公告（即使来源不同、表述不同）
+- 不同事件：话题相似但具体事件不同（如不同公司的融资消息属于不同事件）
+
+处理规则：
+1. 当前消息 vs 历史消息：若当前消息与历史消息是同一事件，跳过当前消息（不发布）
+2. 当前消息 vs 当前消息：若当前消息之间互相重复，保留一条（index 最小的），跳过其余
+
+返回 JSON 格式：
+{
+  "skip": [0, 2],
+  "details": [
+    {"skip_index": 0, "reason": "与历史消息重复: 简述事件"},
+    {"skip_index": 2, "reason": "与当前消息[1]重复"}
+  ]
+}
+
+说明：
+- skip: 要跳过（不发布）的当前消息索引数组
+- 如果没有重复，返回 {"skip": [], "details": []}
+- 只返回 JSON，不要其他文字`,
+    },
+    {
+      role: 'user',
+      content: `【当前待发布消息】（共 ${currentCount} 条）：\n\n${currentJson}\n\n【历史已发布消息】（共 ${histCount} 条，仅供对比参考）：\n\n${historicalJson}`,
+    },
+  ]
+}
+
+module.exports = { classifyPrompt, summarizePrompt, categorySummaryPrompt, extractSpamKeywordsPrompt, eventDedupPrompt, dailyDigestPrompt, prePublishDedupPrompt }

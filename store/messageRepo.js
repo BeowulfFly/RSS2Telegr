@@ -24,6 +24,11 @@ class MessageRepo {
     this._recentMessages = db.prepare(`
       SELECT * FROM messages ORDER BY created_at DESC LIMIT ?
     `)
+    this._recentBeforeToday = db.prepare(`
+      SELECT * FROM messages
+      WHERE date(created_at) < date('now')
+      ORDER BY created_at DESC LIMIT ?
+    `)
     this._countToday = db.prepare(`
       SELECT COUNT(*) as count FROM messages WHERE date(created_at) = date('now')
     `)
@@ -73,6 +78,11 @@ class MessageRepo {
   /** 获取最近 N 条消息 */
   getRecent(limit = 50) {
     return this._recentMessages.all(limit)
+  }
+
+  /** 获取今天之前最近 N 条消息（用于发布前历史去重对比） */
+  getRecentBeforeToday(limit = 100) {
+    return this._recentBeforeToday.all(limit)
   }
 
   /** 获取今日消息数 */

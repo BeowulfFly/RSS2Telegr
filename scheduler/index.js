@@ -3,6 +3,7 @@ const config = require('../config')
 const logger = require('../utils/logger')
 const { classifyBatch } = require('../ai/classifier')
 const { publishMessages } = require('../publisher')
+const { aiDedupBeforePublish } = require('../ai/deduplicator')
 
 /**
  * 启动所有定时任务
@@ -26,7 +27,7 @@ function startScheduler({ bot, store, scraper }) {
         return
       }
 
-      // 过滤（包含 AI 事件去重）
+      // 过滤（hash 去重、关键词、质量过滤；AI 事件去重在发布前执行）
       const filtered = await filterPipeline(messages, messageRepo, aiDedupRepo)
 
       if (filtered.length === 0) {
@@ -64,8 +65,21 @@ function startScheduler({ bot, store, scraper }) {
         return
       }
 
+      // AI 发布前去重：对比内部消息 + 历史已发消息，避免重复发布
+      const historicalMessages = messageRepo.getRecentBeforeToday(100)
+      const dedupedMessages = await aiDedupBeforePublish(validMessages, historicalMessages, aiDedupRepo)
+
+      if (dedupedMessages.length === 0) {
+        logger.info('AI 发布前去重后无剩余消息，跳过发布')
+        return
+      }
+
+      if (dedupedMessages.length < validMessages.length) {
+        logger.info({ before: validMessages.length, after: dedupedMessages.length }, 'AI 发布前去重完成')
+      }
+
       // 逐条发送，使用配置的间隔避免触发 Telegram 频率限制
-      await publishMessages(bot, validMessages, config.publisher.intervalMs)
+      await publishMessages(bot, dedupedMessages, config.publisher.intervalMs)
 
       logger.info({ date: new Date().toISOString().split('T')[0], msgCount: validMessages.length }, '每日消息已逐条发布')
     } catch (err) {

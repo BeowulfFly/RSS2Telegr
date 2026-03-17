@@ -95,18 +95,35 @@ async function publishSingleMessage(bot, msg) {
 
   const category = msg.categoryLabel || msg.category || '精选'
   const source = escapeHtml(msg.source || '未知')
-  const content = escapeHtml(msg.content || '')
+  let content = escapeHtml(msg.content || '')
 
-  // 正常字体：内容在上，来源在下
-  const text = `${content}\n\n` +
-    `<i>来源: ${source}</i>`
+  // 处理内容：删除最后一行如果以 ( 或 via 或 — 开头
+  const lines = content.split('\n')
+  if (lines.length > 0) {
+    const lastLine = lines[lines.length - 1].trim()
+    // 检查最后一行是否以 (、via 或 — 开头
+    if (lastLine.startsWith('(') || lastLine.startsWith('via') || lastLine.startsWith('—') || lastLine.startsWith('-')) {
+      lines.pop() // 删除最后一行
+      content = lines.join('\n').trim()
+    }
+  }
+
+  // 提取标题（第一行）和正文
+  const contentLines = content.split('\n')
+  const title = contentLines[0] || ''
+  const body = contentLines.slice(1).join('\n').trim()
+
+  // 标题使用粗体（模拟大二号字体效果）
+  const formattedText = body 
+    ? `<b>${title}</b>\n\n${body}\n\n<i>来源: ${source}</i>`
+    : `<b>${title}</b>\n\n<i>来源: ${source}</i>`
 
   try {
     // 如果有图片，发送带图片的消息
     if (msg.mediaPath) {
-      await sendPhotoToChannel(bot, msg.mediaPath, text)
+      await sendPhotoToChannel(bot, msg.mediaPath, formattedText)
     } else {
-      await sendToChannel(bot, text)
+      await sendToChannel(bot, formattedText)
     }
     logger.debug({ source: msg.source, hasMedia: !!msg.mediaPath }, '精选消息已发布')
   } catch (err) {
